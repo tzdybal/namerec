@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -48,6 +50,81 @@ func getDateTime(tags map[string]string) (string, error) {
 	return "", errors.New("date and time not found")
 }
 
+func isVideo(file string) bool {
+	switch filepath.Ext(file) {
+	case ".mp4":
+		return true
+	default:
+		return false
+	}
+}
+
+func isImage(file string) bool {
+	switch filepath.Ext(file) {
+	case ".jpg":
+		return true
+	default:
+		return false
+	}
+}
+
+func recoverVideo(dst, file string) error {
+	// https://github.com/Martchus/tageditor
+	output, err := exec.Command("tageditor", "-i", "-f", file).CombinedOutput()
+	if err != nil {
+		return err
+	}
+
+	reader := bytes.NewReader(output)
+	scanner := bufio.NewScanner(reader)
+	tag := "Creation time" // TODO: const
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if idx := strings.Index(line, tag); idx != -1 {
+			date := strings.TrimSpace(line[idx+len(tag):])
+			copyAndTouch(dst, file, "VID", date)
+			return nil
+		}
+	}
+
+	return errors.New("metadata not found")
+}
+
+func recoverImage(dst, input string) error {
+	data, err := exif.Read(input)
+	if err != nil {
+		return err
+	}
+	dateTime, err := getDateTime(data.Tags)
+	if err != nil {
+		return err
+	}
+
+	copyAndTouch(dst, input, "IMG", strings.Replace(dateTime, ":", "-", 2))
+
+	return nil
+}
+
+func copyAndTouch(destination, input, prefix, dateTime string) error {
+	var err error
+	output := filepath.Clean(fmt.Sprintf("%s/%s_%s.jpg", destination, prefix, strings.Replace(strings.Replace(dateTime, ":", "", -1), " ", "_", -1)))
+
+	fmt.Printf("cp %s -> %s\n", input, output)
+
+	err = exec.Command("cp", input, output).Run()
+	if err != nil {
+		return fmt.Errorf("cp: %v", err)
+	}
+
+	err = exec.Command("touch", "-d", dateTime, output).Run()
+	if err != nil {
+		return fmt.Errorf("touch: %v", err)
+	}
+
+	return nil
+}
+
 func main() {
 	if len(os.Args) != 3 {
 		log.Fatalf("usage: %s <src dir> <dst dir>\n", os.Args[0])
@@ -65,31 +142,13 @@ func main() {
 	}
 
 	for _, input := range srcPaths {
-		data, err := exif.Read(input)
-		if err != nil {
-			if err != exif.ErrNoExifData {
-				log.Print(err)
-			}
-			continue
+		if isImage(input) {
+			err = recoverImage(dst, input)
+		} else if isVideo(input) {
+			err = recoverVideo(dst, input)
 		}
-		dateTime, err := getDateTime(data.Tags)
 		if err != nil {
-			log.Print(err)
-			continue
-		}
-
-		output := filepath.Clean(fmt.Sprintf("%s/IMG_%s.jpg", dst, strings.Replace(strings.Replace(dateTime, ":", "", -1), " ", "_", -1)))
-
-		fmt.Printf("cp %s -> %s\n", input, output)
-
-		err = exec.Command("cp", input, output).Run()
-		if err != nil {
-			log.Println("cp:", err)
-		}
-
-		err = exec.Command("touch", "-d", strings.Replace(dateTime, ":", "-", 2), output).Run()
-		if err != nil {
-			log.Println("touch:", err)
+			log.Printf("%s: %v\n", input, err)
 		}
 	}
 }
