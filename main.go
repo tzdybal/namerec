@@ -108,7 +108,8 @@ func recoverImage(dst, input string) error {
 
 func copyAndTouch(destination, input, prefix, dateTime string) error {
 	var err error
-	output := filepath.Clean(fmt.Sprintf("%s/%s_%s.jpg", destination, prefix, strings.Replace(strings.Replace(dateTime, ":", "", -1), " ", "_", -1)))
+
+	output := filepath.Clean(fmt.Sprintf("%s/%s_%s%s", destination, prefix, strings.Replace(strings.Replace(dateTime, ":", "", -1), " ", "_", -1), filepath.Ext(input)))
 
 	fmt.Printf("cp %s -> %s\n", input, output)
 
